@@ -1,0 +1,159 @@
+import pandas as pd
+import matplotlib.dates as mdates
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from datetime import datetime
+import sys
+import os
+import numpy as np
+from tzlocal import get_localzone
+
+class Analyzer:
+    EXPECTED_COLUMNS = ['RawDate', 'Pain Level', 'Gingivtis', 'Breadth Level', 'Stress Level', 
+                        'Weight changes', 'Brushing frequency', 'Fatigue']
+
+    def __init__(self):
+        self.data = None
+    def load_data(self, filepath):
+        try:
+            self.data = pd.read_csv(filepath, header=None)
+            self.data.columns = self.EXPECTED_COLUMNS
+        except Exception as e:
+            print(f'Warning: files missing{e}')
+            sys.exit(1)
+       
+        
+    def clean_date(self):
+        #change rawdate to formatted date
+        self.data['RawDate'] = pd.to_datetime(self.data['RawDate'], format = '%Y-%m-%d %H:%M:%S', errors = 'coerce')
+        #drop n/a values in rawdate
+        self.data = self.data.dropna(subset=['RawDate'])
+        #localize date to UTC
+        self.data['RawDate'] = self.data['RawDate'].dt.tz_localize('UTC')
+        user_timezone = get_localzone()
+        #convert to UTC timezone
+        self.data['RawDate_Local'] = self.data['RawDate'].dt.tz_convert(user_timezone)
+        
+    def clean_symptoms(self):
+        #save Pain Level input as numeric value
+        self.data['Pain Level'] = pd.to_numeric(self.data['Pain Level'], errors = 'coerce')
+        #save Gingivtis input as numeric value
+        self.data['Gingivitis'] = pd.to_numeric(self.data['Gingivitis'], errors = 'coerce')
+        #Save Breadth Level in mapped value
+        self.data['Breadth Level'] = self.data['Breadth Level'].map({'yes':1, 'no' : 0})
+        #Save Stress Level in mapped value
+        self.data['Stress Level'] = self.data['Stress Level'].map({'yes':1, 'no':0})
+        #Save Weight changes input as numeric value
+        self.data['Weight Changes'] = pd.to_numeric(self.data['Weight changes'], errors = 'coerce')
+        #Save Brushing Frequency as mapped value
+        self.data['Brushing Frequency'] = self.data['Brushing Frequency'].map({'yes':1, 'no':0})
+        #Save Fatigue as numeric value
+        self.data['Fatigue'] = pd.to_numeric(self.data['Fatigue'], errors = 'coerce')
+
+    def get_summary(self):
+        if not self.data['Pain Level'].dropna().empty: #drop non-valid value on Pain Level Column
+            avg_pain = self.data['Pain Level'].mean() #find the mean value
+            print(f'average pain: {avg_pain:.1f}') #change the value to float
+        else:
+            print('No data for pain')
+       
+        if not self.data['Gingivitis'].dropna().empty: #drop non-valid value on Gingivitis Column
+            avg_Fatigue = self.data['Gingivitis'].mean() #find the mean value
+            print(f'average Fatigue: {avg_Fatigue:.1f}') #change to value to float
+        else:
+            print('No data for Fatigue')
+
+
+        Stress_data = self.data['Stress Level'].dropna() #drop non-valid value on Stress Level column
+        mtaken_days = Stress_data.sum() # compute the sum of Stress columns
+        count_Breadtj = self.data['Breadth Level'].sum() #count the sum of Breadth Level columns
+        count_BrushingFreq = self.data['Brushing Frequency'].sum() #count the sum of Brushing Frequency columns
+        total_days = Stress_data.count() #count the total days of stress data
+        missing_days = total_days-mtaken_days #find the missing days out of total days
+
+        print(f'Diarrhea days through weeks: {count_Breadtj}') 
+
+        if (total_days==0):
+            print('No medication data available for now')
+        elif (missing_days > 0):
+            print(f'Missed medication for {missing_days} days')
+        else:
+            print('Took medicine everyday')
+        
+        if not self.data['Fatigue'].dropna().empty:
+            avg_stress = self.data['Fatigue'].mean()
+            print(f'average stress: {avg_stress:.1f}')
+        else:
+            print('No data for StressLevel')
+        print(f'Blood in Stools during week: {count_BrushingFreq}')
+
+        if not self.data['WeightChanges'].dropna().empty:
+            avg_wchange = self.data['WeightChanges'].mean()
+            print(f'average weight changes during week: {avg_wchange:.2f}')
+        
+        self.data['week'] = self.data['RawDate'].dt.isocalendar().week
+        weekly_summary = self.data.groupby('week')[['Pain', 'Fatigue', 'Diarrhea', 'Medication', 'StressLevel', 'BloodInStool', 'WeightChanges']].mean()
+        print('week review: \n', weekly_summary)
+    
+    def plot_graph(self):
+        self.data['DateOnly'] = self.data['RawDate_Local'].dt.date 
+        daily_average = self.data.groupby('DateOnly')[['Pain', 'Fatigue']].mean()
+        daily_average = daily_average.round(0).astype(int)
+
+        plt.style.use('ggplot')
+        plt.figure(figsize=(10,5))
+        plt.plot(daily_average.index, daily_average['Pain'], marker = 'o', label = 'Pain')
+        plt.plot(daily_average.index, daily_average['Fatigue'], marker = 's', label = 'Fatigue')
+        plt.title("Breadth checker for gingivitis")
+        plt.xlabel('Date')
+        plt.ylabel('severity')
+        plt.yticks(range(0,11))
+        plt.xticks(rotation=45)
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_diarrhea_bar(self):
+        self.data['week'] = self.data['RawDate'].dt.isocalendar().week
+        weekly_diarrhea = self.data.groupby('week')['Diarrhea'].sum()
+        plt.style.use('ggplot')
+        plt.figure(figsize=(10,5))
+        ax = weekly_diarrhea.plot(kind = 'bar', color = 'orange')
+        plt.title('Weekly diarrheas')
+        plt.xlabel('week number')
+        plt.ylabel('diarrhea days')
+        plt.xticks(rotation=0)
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        plt.tight_layout()
+        plt.show()
+
+
+
+if __name__ == "__main__":
+
+    analyzer = Analyzer()
+    analyzer.load_data('symptom.csv')  
+    analyzer.clean_date()
+    analyzer.clean_symptoms() 
+    analyzer.get_summary()  
+    analyzer.plot_graph()   
+    analyzer.plot_diarrhea_bar()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+
